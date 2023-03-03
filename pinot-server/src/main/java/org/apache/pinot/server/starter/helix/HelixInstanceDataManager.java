@@ -49,6 +49,8 @@ import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.restlet.resources.SegmentErrorInfo;
 import org.apache.pinot.core.data.manager.InstanceDataManager;
+import org.apache.pinot.core.data.manager.offline.OfflineSegmentUploader;
+import org.apache.pinot.core.data.manager.offline.PinotFSOfflineSegmentUploader;
 import org.apache.pinot.core.data.manager.offline.TableDataManagerProvider;
 import org.apache.pinot.core.data.manager.realtime.LLRealtimeSegmentDataManager;
 import org.apache.pinot.core.data.manager.realtime.PinotFSSegmentUploader;
@@ -90,6 +92,7 @@ public class HelixInstanceDataManager implements InstanceDataManager {
   private ServerMetrics _serverMetrics;
   private ZkHelixPropertyStore<ZNRecord> _propertyStore;
   private SegmentUploader _segmentUploader;
+  private OfflineSegmentUploader _offlineSegmentUploader;
   private Supplier<Boolean> _isServerReadyToServeQueries = () -> false;
 
   // Fixed size LRU cache for storing last N errors on the instance.
@@ -113,6 +116,8 @@ public class HelixInstanceDataManager implements InstanceDataManager {
     _serverMetrics = serverMetrics;
     _segmentUploader = new PinotFSSegmentUploader(_instanceDataManagerConfig.getSegmentStoreUri(),
         PinotFSSegmentUploader.DEFAULT_SEGMENT_UPLOAD_TIMEOUT_MILLIS);
+    _offlineSegmentUploader = new PinotFSOfflineSegmentUploader(_instanceDataManagerConfig.getSegmentStoreUri(),
+            PinotFSSegmentUploader.DEFAULT_SEGMENT_UPLOAD_TIMEOUT_MILLIS);
 
     File instanceDataDir = new File(_instanceDataManagerConfig.getInstanceDataDir());
     if (!instanceDataDir.exists()) {
@@ -535,6 +540,11 @@ public class HelixInstanceDataManager implements InstanceDataManager {
   @Override
   public SegmentUploader getSegmentUploader() {
     return _segmentUploader;
+  }
+
+  @Override
+  public OfflineSegmentUploader getOfflineSegmentUploader() {
+    return _offlineSegmentUploader;
   }
 
   @Override

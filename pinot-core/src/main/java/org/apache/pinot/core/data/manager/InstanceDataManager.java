@@ -29,6 +29,7 @@ import org.apache.helix.HelixManager;
 import org.apache.helix.store.zk.ZkHelixPropertyStore;
 import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.pinot.common.metrics.ServerMetrics;
+import org.apache.pinot.core.data.manager.offline.OfflineSegmentUploader;
 import org.apache.pinot.core.data.manager.realtime.SegmentUploader;
 import org.apache.pinot.core.util.SegmentRefreshSemaphore;
 import org.apache.pinot.segment.local.data.manager.TableDataManager;
@@ -180,6 +181,12 @@ public interface InstanceDataManager {
    * uploaded segment file. Servers utilize segment uploader to upload llc segment to segment store.
    */
   SegmentUploader getSegmentUploader();
+
+  /**
+   * Returns the offline table segment uploader, which uploads a offline table segment to the destination place and
+   * returns the status of upload as true or false.
+   */
+  OfflineSegmentUploader getOfflineSegmentUploader();
 
   /**
    * Immediately stop consumption and start committing the consuming segments.

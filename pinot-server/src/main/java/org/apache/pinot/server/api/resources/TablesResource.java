@@ -74,6 +74,7 @@ import org.apache.pinot.common.utils.TarGzCompressionUtils;
 import org.apache.pinot.common.utils.helix.HelixHelper;
 import org.apache.pinot.core.data.manager.InstanceDataManager;
 import org.apache.pinot.core.data.manager.offline.ImmutableSegmentDataManager;
+import org.apache.pinot.core.data.manager.offline.OfflineSegmentUploader;
 import org.apache.pinot.core.data.manager.realtime.RealtimeSegmentDataManager;
 import org.apache.pinot.core.data.manager.realtime.SegmentUploader;
 import org.apache.pinot.segment.local.data.manager.SegmentDataManager;
@@ -534,6 +535,86 @@ public class TablesResource {
             Response.Status.INTERNAL_SERVER_ERROR);
       }
       return segmentDownloadUrl.toString();
+    } finally {
+      FileUtils.deleteQuietly(segmentTarFile);
+      tableDataManager.releaseSegment(segmentDataManager);
+    }
+  }
+
+  /**
+   * Upload an offline table segment to segment store based on the uri mentioned in segment zookeeper metadata.
+   * This endpoint is used when deepstore copy is unavailable for offline table segments.
+   * Please note that invocation of this endpoint may cause query performance to suffer, since we tar up the segment
+   * to upload it.
+   */
+  @POST
+  @Path("/segments/{offlineTableName}/{segmentName}/backup")
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Upload an offline table segment to segment store based on zookeeper metadata",
+          notes = "Upload an offline table segment to segment store based on zookeeper metadata")
+  @ApiResponses(value = {
+          @ApiResponse(code = 200, message = "Success"),
+          @ApiResponse(code = 500, message = "Internal server error", response = ErrorInfo.class),
+          @ApiResponse(code = 404, message = "Table or segment not found", response = ErrorInfo.class),
+          @ApiResponse(code = 400, message = "Bad request", response = ErrorInfo.class)
+  })
+  public void backupOfflineSegment(
+          @ApiParam(value = "Name of the OFFLINE table", required = true) @PathParam("offlineTableName")
+                  String offlineTableName,
+          @ApiParam(value = "Name of the segment", required = true) @PathParam("segmentName") String segmentName)
+          throws Exception {
+    LOGGER.info("Received a request to upload offline table segment {} for table {}", segmentName,
+            offlineTableName);
+
+    // Check if it's offline table
+    TableType tableType = TableNameBuilder.getTableTypeFromTableName(offlineTableName);
+    if (TableType.REALTIME == tableType) {
+      throw new WebApplicationException(
+              String.format("Cannot backup segment for REALTIME table: %s", offlineTableName),
+              Response.Status.BAD_REQUEST);
+    }
+
+    String tableNameWithType = TableNameBuilder.forType(TableType.OFFLINE).tableNameWithType(offlineTableName);
+    TableDataManager tableDataManager =
+            ServerResourceUtils.checkGetTableDataManager(_serverInstance, tableNameWithType);
+    SegmentDataManager segmentDataManager = tableDataManager.acquireSegment(segmentName);
+    if (segmentDataManager == null) {
+      throw new WebApplicationException(
+              String.format("Table %s segment %s does not exist", offlineTableName, segmentName),
+              Response.Status.NOT_FOUND);
+    }
+
+    SegmentZKMetadata zkMetadata =
+            ZKMetadataProvider.getSegmentZKMetadata(_serverInstance.getHelixManager().getHelixPropertyStore(),
+                    tableNameWithType, segmentName);
+    if (zkMetadata == null) {
+      throw new WebApplicationException(
+              String.format("Table %s segment %s download url does not exist", offlineTableName, segmentName),
+              Response.Status.NOT_FOUND);
+    }
+    String uploadUri = zkMetadata.getDownloadUrl();
+
+    File segmentTarFile = null;
+    try {
+      // Create the tar.gz segment file in the server's segmentTarUploadDir folder with a unique file name.
+      File segmentTarUploadDir =
+              new File(_serverInstance.getInstanceDataManager().getSegmentFileDirectory(), SEGMENT_UPLOAD_DIR);
+      segmentTarUploadDir.mkdir();
+
+      segmentTarFile = new File(segmentTarUploadDir, tableNameWithType + "_" + segmentName + "_" + UUID.randomUUID()
+              + TarGzCompressionUtils.TAR_GZ_FILE_EXTENSION);
+      TarGzCompressionUtils.createTarGzFile(new File(tableDataManager.getTableDataDir(), segmentName), segmentTarFile);
+
+      // Use offline segment uploader to upload segment tar file to deepstore and return upload status
+      OfflineSegmentUploader offlineSegmentUploader =
+              _serverInstance.getInstanceDataManager().getOfflineSegmentUploader();
+
+      boolean backupStatus = offlineSegmentUploader.uploadSegment(segmentTarFile, new URI(uploadUri));
+      if (!backupStatus) {
+        throw new WebApplicationException(
+                String.format("Failed to upload table %s segment %s to segment store", offlineTableName, segmentName),
+                Response.Status.INTERNAL_SERVER_ERROR);
+      }
     } finally {
       FileUtils.deleteQuietly(segmentTarFile);
       tableDataManager.releaseSegment(segmentDataManager);
