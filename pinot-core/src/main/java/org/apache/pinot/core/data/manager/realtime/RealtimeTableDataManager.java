@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -99,6 +100,7 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
   // The semaphores will stay in the hash map even if the consuming partitions move to a different host.
   // We expect that there will be a small number of semaphores, but that may be ok.
   private final Map<Integer, Semaphore> _partitionGroupIdToSemaphoreMap = new ConcurrentHashMap<>();
+  private volatile Map<String, SegmentContext> _segmentToQueryableSegmentContextMap = new HashMap<>();
 
   // The old name of the stats file used to be stats.ser which we changed when we moved all packages
   // from com.linkedin to org.apache because of not being able to deserialize the old files using the newer classes
@@ -130,6 +132,7 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
   private TableDedupMetadataManager _tableDedupMetadataManager;
   private TableUpsertMetadataManager _tableUpsertMetadataManager;
   private BooleanSupplier _isTableReadyToConsumeData;
+
 
   public RealtimeTableDataManager(Semaphore segmentBuildSemaphore) {
     this(segmentBuildSemaphore, () -> true);
@@ -240,6 +243,7 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
     } else {
       _isTableReadyToConsumeData = () -> true;
     }
+    refreshSegmentContexts();
   }
 
   @Override
@@ -307,11 +311,24 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
   public List<SegmentContext> getSegmentContexts(List<IndexSegment> selectedSegments,
       Map<String, String> queryOptions) {
     List<SegmentContext> segmentContexts = new ArrayList<>(selectedSegments.size());
-    selectedSegments.forEach(s -> segmentContexts.add(new SegmentContext(s)));
     if (isUpsertEnabled() && !QueryOptionsUtils.isSkipUpsert(queryOptions)) {
-      _tableUpsertMetadataManager.setSegmentContexts(segmentContexts);
+      selectedSegments.forEach(s -> segmentContexts.add(_segmentToQueryableSegmentContextMap.get(s.getSegmentName())));
+    } else {
+      selectedSegments.forEach(s -> segmentContexts.add(new SegmentContext(s)));
     }
     return segmentContexts;
+  }
+
+  public void refreshSegmentContexts() {
+    Map<String, SegmentContext> localSegmentToQueryableSegmentContextMap = new HashMap<>();
+    _segmentDataManagerMap.forEach((k, v) -> {
+      SegmentContext segmentContext = new SegmentContext(v.getSegment());
+      if (isUpsertEnabled()) {
+        _tableUpsertMetadataManager.setSegmentContexts(Collections.singletonList(segmentContext));
+      }
+      localSegmentToQueryableSegmentContextMap.put(k, segmentContext);
+    });
+    _segmentToQueryableSegmentContextMap = localSegmentToQueryableSegmentContextMap;
   }
 
   /**

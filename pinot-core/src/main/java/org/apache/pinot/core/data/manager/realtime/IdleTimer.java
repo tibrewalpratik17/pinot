@@ -29,6 +29,7 @@ public class IdleTimer {
 
   private volatile long _timeWhenStreamLastCreatedOrConsumedMs = 0;
   private volatile long _timeWhenEventLastConsumedMs = 0;
+  private volatile long _timeSinceLastSegmentContextRefreshMs = 0;
 
   public IdleTimer() {
   }
@@ -45,6 +46,7 @@ public class IdleTimer {
     // but that does not guarantee we'll consume an event.
     _timeWhenStreamLastCreatedOrConsumedMs = nowMs;
     _timeWhenEventLastConsumedMs = nowMs;
+    _timeSinceLastSegmentContextRefreshMs = nowMs;
   }
 
   public void markStreamCreated() {
@@ -53,6 +55,10 @@ public class IdleTimer {
 
   public void markEventConsumed() {
     init();
+  }
+
+  public void markSegmentContextRefreshed() {
+    _timeSinceLastSegmentContextRefreshMs = now();
   }
 
   public long getTimeSinceStreamLastCreatedOrConsumedMs() {
@@ -67,5 +73,12 @@ public class IdleTimer {
       return 0;
     }
     return now() - _timeWhenEventLastConsumedMs;
+  }
+
+  public long getTimeSinceLastSegmentContextRefreshMs() {
+    if (_timeSinceLastSegmentContextRefreshMs == 0) {
+      return 0;
+    }
+    return now() - _timeSinceLastSegmentContextRefreshMs;
   }
 }

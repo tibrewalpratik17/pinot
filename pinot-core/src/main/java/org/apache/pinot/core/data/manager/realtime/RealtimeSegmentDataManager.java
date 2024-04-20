@@ -418,6 +418,7 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     _numRowsErrored = 0;
     long idlePipeSleepTimeMillis = 100;
     long idleTimeoutMillis = _streamConfig.getIdleTimeoutMillis();
+    long idleSegmentContextFreshnessMs = 2000;
     _idleTimer.init();
 
     StreamPartitionMsgOffset lastUpdatedOffset = _streamPartitionMsgOffsetFactory
@@ -507,7 +508,10 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
           _idleTimer.markStreamCreated();
         }
       }
-
+      if (_idleTimer.getTimeSinceLastSegmentContextRefreshMs() > idleSegmentContextFreshnessMs) {
+        _realtimeTableDataManager.refreshSegmentContexts();
+        _idleTimer.markSegmentContextRefreshed();
+      }
       if (endCriteriaReached) {
         // check this flag to avoid calling endCriteriaReached() at the beginning of the loop
         break;
@@ -696,7 +700,7 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
           // If upsertTTL is enabled, we will remove expired primary keys from upsertMetadata after taking snapshot.
           _partitionUpsertMetadataManager.removeExpiredPrimaryKeys();
         }
-
+        _realtimeTableDataManager.refreshSegmentContexts();
         while (!_state.isFinal()) {
           if (_state.shouldConsume()) {
             consumeLoop();  // Consume until we reached the end criteria, or we are stopped.
